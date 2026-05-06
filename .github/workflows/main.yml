@@ -1,57 +1,46 @@
-name: Build Recovery-Specific Kernel
+name: Recovery Kernel Builder (d2s)
 
 on:
-  workflow_dispatch: # تشغيل يدوي
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Choose build type"
+        required: true
+        default: "recovery"
+        type: choice
+        options:
+        - recovery
+        - boot
 
 jobs:
-  build-kernel:
+  build_d2s:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Kernel Source
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev-i386 x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig
+
+      - name: Checkout Source
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
+          # تم حذف التوكن الخاص واستخدام الافتراضي
+          token: ${{ github.token }}
 
-      - name: Install Toolchain
+      - name: Update submodules
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm
+          git submodule sync --recursive
+          git submodule update --init --force --recursive --remote
 
-      - name: Setup Build Environment
-        run: |
-          echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "SUBARCH=arm64" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          # إذا كنت بتستخدم Clang (أفضل للحجم)
-          echo "CC=clang" >> $GITHUB_ENV
+      - name: Build Recovery Kernel for d2s
+        # تم تعديل البارامترات: -k Y (كيرنل نعم) و -r Y (ريكفري نعم)
+        # هاد الأمر رح يشغل سكريبت المطور ويجبره يدمج recovery.config
+        run: ./workflows.sh -m d2s -k Y -r Y
 
-      - name: Merge Configs & Prep
-        run: |
-          # 1. دمج الـ Configs بالترتيب (الأساسي ثم الموديل ثم الريكفري)
-          # هاد هو السر اللي بيخلي الكيرنل يطلع "نحيف"
-          make exynos9820_defconfig
-          scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/d2s.config
-          scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/recovery.config
-          
-          # 2. التأكد من تطبيق "Optimize for Size"
-          sed -i 's/CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y/# CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE is not set/g' .config
-          echo "CONFIG_CC_OPTIMIZE_FOR_SIZE=y" >> .config
-          
-          # 3. تحديث الـ Config النهائي
-          make olddefconfig
-
-      - name: Build Kernel Image
-        run: |
-          make -j$(nproc --all) Image
-
-      - name: Post-Build Stripping (Crucial for Size)
-        run: |
-          # تنظيف ملف الـ Image من أي رموز تصحيحية زايدة يدوياً
-          llvm-strip -g arch/arm64/boot/Image
-          cp arch/arm64/boot/Image recovery_kernel_Image
-
-      - name: Upload Recovery Kernel
+      - name: Upload Recovery Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Recovery-Kernel-d2s
-          path: recovery_kernel_Image
+          name: ExtremeKRNL-Recovery-d2s
+          # المسار المتوقع للملفات الناتجة (تأكد من مجلد build/out عندك)
+          path: build/out/d2s/
